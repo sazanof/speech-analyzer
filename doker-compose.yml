@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_MODE=${APP_MODE:-development}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT:-5432}/${DB_DB}
+      - DB_SERVER=db  # в Docker сети используем имя сервиса
+      - DB_PORT=${DB_PORT:-5432}
+      - ENABLE_IP_WHITELIST=${ENABLE_IP_WHITELIST:-true}
+      - ALLOWED_IPS=${ALLOWED_IPS}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  db:
+    image: postgres:17
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_DB}
+    ports:
+      - "${DB_PORT:-5432}:5432"  # Пробрасываем порт наружу, если нужно
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # опционально
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DB}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:

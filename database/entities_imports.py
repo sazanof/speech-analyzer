@@ -1,0 +1,3 @@
+from entities.recording_entity import RecordingEntity
+from entities.dictionary_entity import DictionaryEntity
+from entities.conversation_entity import ConversationEntity

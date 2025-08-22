@@ -1,0 +1,64 @@
+# Файлы окружения
+.env
+.env.*
+!.env.example
+
+tmp/
+
+# Docker
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+.idea
+*.swp
+*.swo
+
+# Логи
+*.log
+logs/
+
+# Бэкапы и временные файлы
+*.bak
+*.tmp
+*.temp
+
+# Базы данных
+*.db
+*.sqlite3
+
+# Системные
+.DS_Store
+Thumbs.db
