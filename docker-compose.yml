@@ -1,8 +1,8 @@
-version: '3.8'
-
 services:
   web:
     build: .
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
@@ -25,6 +25,8 @@ services:
 
   db:
     image: postgres:17
+    env_file:
+      - .env
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}

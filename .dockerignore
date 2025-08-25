@@ -12,6 +12,5 @@ venv/
 README.md
 Dockerfile
 docker-compose.yml
-alembic.ini
 tmp
 tmp/
