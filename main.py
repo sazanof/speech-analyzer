@@ -5,7 +5,6 @@ from fastapi import FastAPI, Depends
 
 from classes.logger import Logger
 from database.migrations import MigrationManager
-from dependencies.ip_auth import ip_whitelist_dependency
 from middleware.ip_whitelist import IPWhitelistMiddleware
 from routes.conversation import conversations
 from routes.dictionaries import dictionaries
@@ -36,7 +35,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     lifespan=lifespan,
-    root_path=settings.API_ROOT
+    root_path=settings.API_ROOT,
+    docs_url="/docs" if settings.APP_MODE != "production" else None,
+    redoc_url="/redoc" if settings.APP_MODE != "production" else None,
+    openapi_url="/openapi.json" if settings.APP_MODE != "production" else None
 )
 
 # Добавляем middleware если включена IP-фильтрация
