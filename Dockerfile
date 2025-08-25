@@ -1,23 +1,32 @@
+# Используем официальный Python образ
 FROM python:3.13-slim
 
+# Устанавливаем системные зависимости для Whisper и PostgreSQL
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Рабочая директория - это корень приложения
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем ВСЕ в корень /app (а не в /app/app/)
+# Копируем зависимости
+COPY requirements.txt .
+
+# Устанавливаем Python зависимости
+RUN pip install -r requirements.txt
+
+# Копируем исходный код
 COPY . .
+#COPY alembic/ ./alembic/
 
-RUN pip install --no-cache-dir -r requirements.txt
+# Создаем не-root пользователя для безопасности
+RUN useradd -m -u 1000 calls && chown -R calls:calls /app
+USER calls
 
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
-
+# Открываем порт
 EXPOSE 8000
 
-# Запускаем main.py который находится в корне
+# Запускаем приложение
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
