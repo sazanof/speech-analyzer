@@ -29,6 +29,7 @@ class ConversationAnalysis(BaseModel):
 
 
 class ConversationModel(BaseModel):
+    id: int|None = None,
     recording_id: int
     speaker: str
     text: str
