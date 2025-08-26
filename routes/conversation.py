@@ -3,7 +3,7 @@ from sqlmodel import select, asc
 
 from database.database import write_session
 from entities.conversation_entity import ConversationEntity
-from models.conversation_model import ConversationHighlight, ConversationModel
+from models.conversation_model import ConversationHighlight, ConversationModel, ConversationIdModel
 from models.success_response import SuccessResponse
 
 conversations = APIRouter(
@@ -28,7 +28,7 @@ def get_recording(
         else:
             return SuccessResponse(
                 data=[
-                    ConversationModel.model_validate(c.model_dump()) for c in conversations_orm
+                    ConversationIdModel.model_validate(c.model_dump()) for c in conversations_orm
                 ]
             )
 
@@ -48,7 +48,7 @@ def get_recording(
         if not conversations_orm:
             return SuccessResponse(success=False)
         else:
-            _all = [ConversationModel.model_validate(c.model_dump()) for c in conversations_orm]
+            _all = [ConversationIdModel.model_validate(c.model_dump()) for c in conversations_orm]
             for conversation in _all:
                 if len(conversation.analysis.highlights) > 0:
                     for h in conversation.analysis.highlights:

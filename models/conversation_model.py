@@ -29,7 +29,6 @@ class ConversationAnalysis(BaseModel):
 
 
 class ConversationModel(BaseModel):
-    id: int|None = None,
     recording_id: int
     speaker: str
     text: str
@@ -37,3 +36,6 @@ class ConversationModel(BaseModel):
     start_time: float
     end_time: float
     analysis: ConversationAnalysis
+
+class ConversationIdModel(ConversationModel):
+    id:int
