@@ -57,7 +57,7 @@ class RecognizeThread:
             pending_task = session.exec(
                 select(RecordingEntity)
                 .where(
-                    RecordingEntity.recognize_status == RecordingTaskStatus.PENDING,
+                    RecordingEntity.recognize_status == RecordingTaskStatus.PENDING.value,
                     RecordingEntity.id != current_task_id
                 )
                 .order_by(asc(RecordingEntity.created))
@@ -71,7 +71,7 @@ class RecognizeThread:
                 new_task = session.exec(
                     select(RecordingEntity)
                     .where(
-                        RecordingEntity.recognize_status == RecordingTaskStatus.NEW,
+                        RecordingEntity.recognize_status == RecordingTaskStatus.NEW.value,
                         RecordingEntity.id != current_task_id
                     )
                     .order_by(asc(RecordingEntity.created))
@@ -99,11 +99,11 @@ class RecognizeThread:
                     Logger.err(f"Task not found in DB: {task.id}")
                     return
 
-                if db_record.recognize_status != RecordingTaskStatus.NEW:
+                if db_record.recognize_status != RecordingTaskStatus.NEW.value:
                     Logger.debug(f"Task {task.id} already in progress, skipping")
                     return
 
-                db_record.recognize_status = RecordingTaskStatus.PENDING
+                db_record.recognize_status = RecordingTaskStatus.PENDING.value
                 db_record.recognize_start = datetime.now()
                 session.add(db_record)
                 session.commit()
@@ -120,7 +120,8 @@ class RecognizeThread:
                     db_record.duration = analysis.duration
                     db_record.conversation = [u.model_dump() for u in analysis.utterances]
                     db_record.recognize_end = datetime.now()
-                    db_record.recognize_status = RecordingTaskStatus.FINISHED
+                    db_record.recognize_status = RecordingTaskStatus.FINISHED.value
+                    db_record.analysis_status = RecordingTaskStatus.NEW.value # Analyte text again
                     session.add(db_record)
                     session.commit()
 
@@ -139,14 +140,14 @@ class RecognizeThread:
             db_record = session.get(RecordingEntity, task_id)
             if db_record:
                 db_record.recognize_end = datetime.now()
-                db_record.recognize_status = RecordingTaskStatus.FAILED
+                db_record.recognize_status = RecordingTaskStatus.FAILED.value
                 session.add(db_record)
                 session.commit()
 
     @staticmethod
     def _select_by_status(status: RecordingTaskStatus):
         return (select(RecordingEntity)
-                .where(RecordingEntity.recognize_status == status)
+                .where(RecordingEntity.recognize_status == status.value)
                 .order_by(asc(RecordingEntity.created)))
 
     def start(self):

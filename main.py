@@ -5,6 +5,7 @@ from fastapi import FastAPI, Depends
 
 from classes.logger import Logger
 from database.migrations import MigrationManager
+from database.task_cleanup import TaskCleanup
 from middleware.ip_whitelist import IPWhitelistMiddleware
 from routes.conversation import conversations
 from routes.dictionaries import dictionaries
@@ -19,6 +20,8 @@ from threads.recognize_record_thread import recognize_thread
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Сбрасываем зависшие задачи
+    TaskCleanup.reset_stuck_tasks()
     # Только если используем Nuitka (проверка скомпилированного режима)
     MigrationManager.run_migrations()
     Logger.info('Generator lifespan at start of app')
@@ -29,6 +32,9 @@ async def lifespan(app: FastAPI):
     analyze_text_processor.start_fetcher(interval=30)
 
     yield
+    # Останавливаем потоки при завершении
+    recognize_thread.stop()
+    analyze_text_processor.shutdown()
     # Clean up the ML entities and release the resources
     Logger.info('Finish lifespan at end of app')
 

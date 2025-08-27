@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, AnyUrl
+from pydantic import BaseModel, Field
 
 from entities.enums.recording_task_status import RecordingTaskStatus
 from models.recognizer_models import Utterance

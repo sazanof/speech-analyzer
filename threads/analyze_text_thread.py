@@ -54,12 +54,12 @@ class TaskProcessor:
                     Logger.err(f"Recording {recording_id} not found")
                     return
 
-                if recording.analysis_status != RecordingTaskStatus.NEW:
+                if recording.analysis_status != RecordingTaskStatus.NEW.value:
                     Logger.warn(f"Recording {recording_id} has status {recording.analysis_status}, skipping")
                     return
 
                 # Обновляем статус
-                recording.analysis_status = RecordingTaskStatus.PENDING
+                recording.analysis_status = RecordingTaskStatus.PENDING.value
                 recording.analysis_start = datetime.now()
                 session.add(recording)
                 session.commit()
@@ -70,6 +70,7 @@ class TaskProcessor:
                 dict_data = [{
                     "id": dict.id,
                     "name": dict.name,
+                    "color": dict.color,
                     "type": dict.type,
                     "phrases": dict.phrases,
                 } for dict in dictionaries]
@@ -115,7 +116,7 @@ class TaskProcessor:
                         #     f'[{utterance_with_highlights.start_time}] speaker: {utterance_with_highlights.speaker}, text: {utterance_with_highlights.text_with_highlights}')
 
                 # Обновляем статус после завершения
-                recording.analysis_status = RecordingTaskStatus.FINISHED
+                recording.analysis_status = RecordingTaskStatus.FINISHED.value
                 recording.analysis_end = datetime.now()
                 session.add(recording)
                 session.commit()
@@ -124,7 +125,7 @@ class TaskProcessor:
                 Logger.err(f"Error processing recording {recording_id}: {e}")
                 # В случае ошибки помечаем запись как FAILED
                 if recording:
-                    recording.analysis_status = RecordingTaskStatus.FAILED
+                    recording.analysis_status = RecordingTaskStatus.FAILED.value
                     recording.analysis_end = datetime.now()
                     session.add(recording)
                     session.commit()
@@ -137,8 +138,8 @@ class TaskProcessor:
             try:
                 recordings = session.exec(
                     select(RecordingEntity)
-                    .where(RecordingEntity.recognize_status == RecordingTaskStatus.FINISHED)
-                    .where(RecordingEntity.analysis_status == RecordingTaskStatus.NEW)
+                    .where(RecordingEntity.recognize_status == RecordingTaskStatus.FINISHED.value)
+                    .where(RecordingEntity.analysis_status == RecordingTaskStatus.NEW.value)
                     .limit(self.max_workers * 2)  # Берем в 2 раза больше задач, чем воркеров
                 ).all()
 

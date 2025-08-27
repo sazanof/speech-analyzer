@@ -16,12 +16,12 @@ class RecordingEntityBase:
         index=True,
         unique=True,
     ),
-    recognize_status: RecordingTaskStatus = Field(
-        default=RecordingTaskStatus.NEW,
+    recognize_status: int = Field(
+        default=RecordingTaskStatus.NEW.value,
         index=True
     )
-    analysis_status: RecordingTaskStatus = Field(
-        default=RecordingTaskStatus.NEW,
+    analysis_status: int = Field(
+        default=RecordingTaskStatus.NEW.value,
         index=True
     )
     duration: float = Field(
@@ -38,6 +38,19 @@ class RecordingEntityBase:
 
     analysis_start: datetime | None = Field(nullable=True)
     analysis_end: datetime | None = Field(nullable=True)
+
+    # Хелпер-методы для удобства
+    def get_recognize_status_enum(self) -> RecordingTaskStatus:
+        return RecordingTaskStatus(self.recognize_status)
+
+    def set_recognize_status_enum(self, status: RecordingTaskStatus):
+        self.recognize_status = status.value
+
+    def get_analysis_status_enum(self) -> RecordingTaskStatus:
+        return RecordingTaskStatus(self.analysis_status)
+
+    def set_analysis_status_enum(self, status: RecordingTaskStatus):
+        self.analysis_status = status.value
 
 
 class RecordingEntity(

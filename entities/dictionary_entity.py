@@ -9,14 +9,28 @@ class DictionaryType(str, Enum):
     BOTH = "both"
 
 class DictionaryBase(SQLModel):
-    name: str = Field(index=True, nullable=False)
-    type: DictionaryType = Field(default=DictionaryType.BOTH)
-    phrases: List[str] = Field(sa_column=Column(JSON), default_factory=list)
-    description: Optional[str] = Field(default=None)
+    name: str = Field(
+        index=True,
+        nullable=False
+    )
+    type: str = Field(
+        default=DictionaryType.BOTH, index=True
+    )
+    phrases: List[str] = Field(
+        sa_column=Column(JSON), default_factory=list
+    )
+    description: Optional[str] = Field(
+        default=None
+    )
+    color: Optional[str] = Field(default="#CCCCCC")
 
 class DictionaryEntity(DictionaryBase, table=True):
     __tablename__ = "dictionaries"
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(
+        default=None,
+        index=True,
+        primary_key=True
+    )
 
 class DictionaryCreate(DictionaryBase):
     pass
@@ -29,3 +43,5 @@ class DictionaryUpdate(SQLModel):
     type: Optional[DictionaryType] = None
     phrases: Optional[List[str]] = None
     description: Optional[str] = None
+    color: Optional[str] = None
+

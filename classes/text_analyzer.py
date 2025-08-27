@@ -139,7 +139,7 @@ class TextAnalyzer:
             # Подсвеченный текст
             highlighted_text = text[highlight.start_pos:highlight.end_pos]
             result.append(
-                f'<mark class="match {highlight.match_type}" data-dict="{highlight.dictionary_name}">{highlighted_text}</mark>')
+                f'<mark style="background-color:{highlight.dictionary_color or "#cccccc"}" class="match {highlight.match_type}" data-dict-name="{highlight.dictionary_name}" data-dict="{highlight.dictionary_id}">{highlighted_text}</mark>')
 
             last_pos = highlight.end_pos
 
@@ -183,6 +183,7 @@ class TextAnalyzer:
                                 end_pos=end_pos,
                                 dictionary_name=dictionary["name"],
                                 dictionary_id=dictionary["id"],
+                                dictionary_color=dictionary["color"],
                                 match_type=match_type
                             )
                         )
