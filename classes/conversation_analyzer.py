@@ -107,6 +107,7 @@ class ConversationAnalyzer:
             audio_path,
             verbose=True,
             temperature=0,
+            language="ru",
             condition_on_previous_text=False  # Критично важно!
         )
         time.sleep(1)
