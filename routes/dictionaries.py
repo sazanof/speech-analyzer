@@ -36,7 +36,7 @@ def create_dictionary(
                     RecordingTaskStatus.FAILED.value,
                     RecordingTaskStatus.FINISHED.value,
                 ]))
-                .values(recognize_status=RecordingTaskStatus.NEW.value)
+                .values(analysis_status=RecordingTaskStatus.NEW.value)
             )
 
             return db_dict
@@ -123,7 +123,7 @@ def update_dictionary(dict_id: int, dictionary: DictionaryUpdate):
                     RecordingTaskStatus.FAILED.value,
                     RecordingTaskStatus.FINISHED.value,
                 ]))
-                .values(recognize_status=RecordingTaskStatus.NEW.value)
+                .values(analysis_status=RecordingTaskStatus.NEW.value)
             )
 
             return db_dict
@@ -149,7 +149,7 @@ def delete_dictionary(dict_id: int):
                     RecordingTaskStatus.FAILED.value,
                     RecordingTaskStatus.FINISHED.value,
                 ]))
-                .values(recognize_status=RecordingTaskStatus.NEW.value)
+                .values(analysis_status=RecordingTaskStatus.NEW.value)
             )
 
             return SuccessResponse()
