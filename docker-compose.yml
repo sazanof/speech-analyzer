@@ -1,6 +1,8 @@
 services:
   web:
     build: .
+    volumes:
+      - whisper-cache:/app/whisper-cache
     env_file:
       - .env
     ports:
@@ -45,3 +47,4 @@ services:
 
 volumes:
   postgres_data:
+  whisper-cache:
