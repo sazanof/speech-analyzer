@@ -180,4 +180,4 @@ class RecognizeThread:
 
 
 # Создаем экземпляр с 4 рабочими потоками
-recognize_thread = RecognizeThread(max_workers=2)
+recognize_thread = RecognizeThread(max_workers=1)
