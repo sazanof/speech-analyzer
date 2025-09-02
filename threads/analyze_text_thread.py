@@ -88,7 +88,7 @@ class TaskProcessor:
                         )
                         utterances.append(utterance)
 
-                    analysis_results = self.analyzer.analyze_conversation(utterances, dict_data)
+                    analysis_results = self.analyzer.analyze_conversation_batch(utterances, dict_data)
 
                     Logger.info(f"Analysis results for recording {recording_id}")
                     for key, res in analysis_results.items():
