@@ -1,13 +1,11 @@
 # services/text_analyzer.py
 import logging
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 import pymorphy3
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 import re
 from functools import lru_cache
-import time
-from collections import defaultdict
 from entities.dictionary_entity import DictionaryType
 from models.conversation_model import ConversationAnalysis, ConversationHighlight, ConversationModel
 from models.recognizer_models import Utterance
@@ -42,132 +40,146 @@ class AnalysisResult(BaseModel):
         }
 
 
-class CachedMorphAnalyzer:
-    """Кэшированный морфологический анализатор"""
+class EnhancedMorphAnalyzer:
+    """Улучшенный морфологический анализатор с кэшированием"""
 
     def __init__(self):
         self.morph = pymorphy3.MorphAnalyzer()
-        self.parse_cache = {}
         self.normalize_cache = {}
+        self.phrase_normalize_cache = {}
 
     @lru_cache(maxsize=10000)
-    def cached_parse(self, word: str):
-        return self.morph.parse(word)[0]
-
-    @lru_cache(maxsize=10000)
-    def cached_normalize(self, word: str) -> str:
+    def normalize_word(self, word: str) -> str:
+        """Нормализация одного слова"""
         try:
-            parsed = self.cached_parse(word)
+            parsed = self.morph.parse(word)[0]
             return parsed.normal_form
         except:
             return word.lower()
 
+    def normalize_phrase(self, phrase: str) -> str:
+        """Нормализация целой фразы с кэшированием"""
+        if phrase in self.phrase_normalize_cache:
+            return self.phrase_normalize_cache[phrase]
 
-class FastTextAnalyzer:
-    """Оптимизированный анализатор текста"""
+        words = re.findall(r'\b\w+\b', phrase.lower())
+        normalized_words = [self.normalize_word(word) for word in words]
+        result = ' '.join(normalized_words)
 
-    def __init__(self):
-        self.morph = CachedMorphAnalyzer()
-        self.short_words = {
+        self.phrase_normalize_cache[phrase] = result
+        return result
+
+    def get_phrase_keywords(self, phrase: str) -> Set[str]:
+        """Извлечение ключевых слов из фразы (исключая стоп-слова)"""
+        stop_words = {
             "я", "мне", "меня", "ты", "тебе", "тебя", "он", "его", "ей", "она",
             "мы", "нам", "нас", "вы", "вам", "вас", "они", "им", "их",
             "в", "на", "за", "под", "над", "от", "до", "из", "к", "по", "со", "у",
             "и", "а", "но", "да", "или", "ли", "же", "бы", "вот", "всё", "все",
-            "не", "ни", "как", "так", "то", "это", "что", "чтоб", "чтобы", "для"
+            "не", "ни", "как", "так", "то", "это", "что", "чтоб", "чтобы", "для",
+            "о", "об", "про", "с", "со", "из-за", "из", "от", "до", "по", "под",
+            "над", "перед", "при", "через", "сквозь", "между", "среди", "вокруг"
         }
+
+        words = re.findall(r'\b\w+\b', phrase.lower())
+        keywords = {self.normalize_word(word) for word in words
+                    if len(word) > 2 and word not in stop_words}
+        return keywords
+
+
+class EnhancedTextAnalyzer:
+    """Улучшенный анализатор текста с учетом морфологии целых фраз"""
+
+    def __init__(self):
+        self.morph = EnhancedMorphAnalyzer()
 
         # Предварительно скомпилированные regex patterns
         self.word_pattern = re.compile(r'\b\w+\b')
         self.phrase_patterns = {}
 
-        # Кэширование
-        self.normalize_cache = {}
-        self.phrase_positions_cache = {}
-        self.similarity_cache = {}
+    def find_exact_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
+        """Точный поиск позиций фразы"""
+        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        return [(match.start(), match.end()) for match in pattern.finditer(text)]
 
-    def is_short_word(self, word: str) -> bool:
-        return len(word) <= 3 or word.lower() in self.short_words
+    def find_normalized_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
+        """Поиск позиций нормализованной фразы"""
+        norm_phrase = self.morph.normalize_phrase(phrase)
+        norm_text = self.morph.normalize_phrase(text)
 
-    @lru_cache(maxsize=10000)
-    def normalize_text(self, text: str) -> str:
-        """Кэшированная нормализация текста"""
-        words = text.lower().split()
-        normalized_words = []
-        for word in words:
-            normalized_words.append(self.morph.cached_normalize(word))
-        return " ".join(normalized_words)
+        # Ищем нормализованную фразу в нормализованном тексте
+        pattern = re.compile(re.escape(norm_phrase), re.IGNORECASE)
+        matches = list(pattern.finditer(norm_text))
 
-    def find_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
-        """Быстрый поиск позиций фразы с кэшированием patterns"""
-        cache_key = f"{phrase}_{text}"
-        if cache_key in self.phrase_positions_cache:
-            return self.phrase_positions_cache[cache_key]
+        if not matches:
+            return []
 
-        if phrase not in self.phrase_patterns:
-            self.phrase_patterns[phrase] = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
+        # Преобразуем позиции из нормализованного текста в оригинальный
+        original_positions = []
+        text_words = list(self.word_pattern.finditer(text))
+        norm_text_words = list(self.word_pattern.finditer(norm_text))
 
-        pattern = self.phrase_patterns[phrase]
-        positions = [(match.start(), match.end()) for match in pattern.finditer(text)]
+        for match in matches:
+            # Находим соответствующие слова в оригинальном тексте
+            start_idx = len(norm_text[:match.start()].split())
+            end_idx = len(norm_text[:match.end()].split())
 
-        self.phrase_positions_cache[cache_key] = positions
-        return positions
+            if start_idx < len(text_words) and end_idx <= len(text_words):
+                start_pos = text_words[start_idx].start()
+                end_pos = text_words[end_idx - 1].end() if end_idx > 0 else text_words[-1].end()
+                original_positions.append((start_pos, end_pos))
 
-    def is_phrase_in_text(self, phrase: str, text: str, threshold: float = 0.8) -> Tuple[
+        return original_positions
+
+    def is_phrase_in_text(self, phrase: str, text: str, threshold: float = 0.85) -> Tuple[
         bool, str, List[Tuple[int, int]]]:
         """
-        Оптимизированная проверка вхождения фразы
+        Улучшенная проверка вхождения фразы с учетом морфологии
         """
-        # 1. Быстрая проверка точного совпадения
-        if phrase.lower() in text.lower():
-            exact_positions = self.find_phrase_positions(phrase, text)
-            if exact_positions:
-                return True, "exact", exact_positions
+        # 1. Точное совпадение
+        exact_positions = self.find_exact_phrase_positions(phrase, text)
+        if exact_positions:
+            return True, "exact", exact_positions
 
-        # 2. Быстрая проверка частичного совпадения
-        norm_phrase = self.normalize_text(phrase)
-        norm_text = self.normalize_text(text)
+        # 2. Нормализованное совпадение (учитывает морфологию)
+        normalized_positions = self.find_normalized_phrase_positions(phrase, text)
+        if normalized_positions:
+            return True, "normalized", normalized_positions
 
-        # 3. Для коротких фраз - быстрая проверка
-        if len(phrase.split()) <= 3:
-            if all(word in norm_text.split() for word in norm_phrase.split()):
-                fuzzy_positions = self.find_fuzzy_positions(phrase, text)
-                return True, "partial", fuzzy_positions
+        # 3. Семантическое сходство для длинных фраз
+        if len(phrase.split()) >= 3:
+            norm_phrase = self.morph.normalize_phrase(phrase)
+            norm_text = self.morph.normalize_phrase(text)
 
-        # 4. Быстрый fuzzy matching
-        similarity = fuzz.partial_ratio(norm_phrase, norm_text) / 100
-        if similarity >= threshold:
-            fuzzy_positions = self.find_fuzzy_positions(phrase, text)
-            if fuzzy_positions:
-                return True, "fuzzy", fuzzy_positions
+            # Проверяем ключевые слова
+            phrase_keywords = self.morph.get_phrase_keywords(phrase)
+            text_keywords = self.morph.get_phrase_keywords(text)
+
+            # Должно быть не менее 70% ключевых слов
+            if phrase_keywords and text_keywords:
+                common_keywords = phrase_keywords & text_keywords
+                keyword_similarity = len(common_keywords) / len(phrase_keywords)
+
+                if keyword_similarity >= 0.7:
+                    # Дополнительная проверка fuzzy similarity
+                    similarity = fuzz.partial_ratio(norm_phrase, norm_text) / 100
+                    if similarity >= threshold:
+                        # Находим позиции ключевых слов
+                        positions = []
+                        for keyword in common_keywords:
+                            # Ищем ключевые слова в тексте
+                            for match in re.finditer(r'\b' + re.escape(keyword) + r'\b', norm_text, re.IGNORECASE):
+                                # Находим соответствующую позицию в оригинальном тексте
+                                original_match = list(self.word_pattern.finditer(text))[match.start()]
+                                positions.append((original_match.start(), original_match.end()))
+
+                        if positions:
+                            return True, "semantic", positions
 
         return False, "none", []
 
-    def find_fuzzy_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
-        """Быстрый поиск fuzzy позиций"""
-        words = phrase.split()
-        positions = []
-        text_lower = text.lower()
-
-        for word in words:
-            if not self.is_short_word(word):
-                # Быстрый поиск слова в тексте
-                match = re.search(r'\b' + re.escape(word) + r'\b', text_lower)
-                if match:
-                    positions.append((match.start(), match.end()))
-                else:
-                    # Быстрый fuzzy search для похожих слов
-                    text_words = self.word_pattern.findall(text_lower)
-                    if text_words:
-                        best_match, score, _ = process.extractOne(word, text_words, scorer=fuzz.ratio)
-                        if score >= 80:  # Высокий порог для fuzzy
-                            match = re.search(r'\b' + re.escape(best_match) + r'\b', text_lower)
-                            if match:
-                                positions.append((match.start(), match.end()))
-
-        return positions
-
     def add_highlights_to_text(self, text: str, highlights: List[ConversationHighlight]) -> str:
-        """Оптимизированное добавление подсветок"""
+        """Добавление подсветок с обработкой пересечений"""
         if not highlights:
             return text
 
@@ -180,11 +192,36 @@ class FastTextAnalyzer:
 
         sorted_highlights = sorted(unique_highlights.values(), key=lambda x: x.start_pos)
 
+        # Обрабатываем пересекающиеся подсветки
+        merged_highlights = []
+        current_highlight = None
+
+        for highlight in sorted_highlights:
+            if current_highlight is None:
+                current_highlight = highlight
+            elif highlight.start_pos <= current_highlight.end_pos:
+                # Объединяем пересекающиеся подсветки
+                current_highlight = ConversationHighlight(
+                    phrase=f"{current_highlight.phrase}|{highlight.phrase}",
+                    start_pos=min(current_highlight.start_pos, highlight.start_pos),
+                    end_pos=max(current_highlight.end_pos, highlight.end_pos),
+                    dictionary_name="multiple",
+                    dictionary_id=0,
+                    dictionary_color="#ff9900",
+                    match_type="merged"
+                )
+            else:
+                merged_highlights.append(current_highlight)
+                current_highlight = highlight
+
+        if current_highlight:
+            merged_highlights.append(current_highlight)
+
         # Быстрое построение результата
         result_parts = []
         last_pos = 0
 
-        for highlight in sorted_highlights:
+        for highlight in merged_highlights:
             if highlight.start_pos > last_pos:
                 result_parts.append(text[last_pos:highlight.start_pos])
 
@@ -201,27 +238,34 @@ class FastTextAnalyzer:
 
 
 class TextAnalyzer:
-    """Основной класс анализатора с оптимизациями"""
+    """Основной класс анализатора с улучшенной морфологией"""
 
     def __init__(self):
-        self.fast_analyzer = FastTextAnalyzer()
-        self.rude_words = ["дурак", "идиот", "кретин", "мудак", "сволочь"]
-        self.greetings = ["здравствуйте", "добрый день", "доброе утро", "добрый вечер", "приветствую"]
-
-        # Предварительная обработка словарей
-        self.preprocessed_rude = set(self.rude_words)
-        self.preprocessed_greetings = set(self.greetings)
+        self.enhanced_analyzer = EnhancedTextAnalyzer()
+        self.preprocessed_dictionaries = {}
 
         # Кэш анализа
         self.analysis_cache = {}
         self.cache_hits = 0
         self.cache_misses = 0
 
+    def preprocess_dictionaries(self, dictionaries: List[Dict]) -> None:
+        """Предварительная обработка словарей"""
+        self.preprocessed_dictionaries = {}
+        for dictionary in dictionaries:
+            dict_id = dictionary["id"]
+            self.preprocessed_dictionaries[dict_id] = {
+                'original': dictionary,
+                'normalized_phrases': [self.enhanced_analyzer.morph.normalize_phrase(phrase)
+                                       for phrase in dictionary["phrases"]],
+                'phrase_keywords': [self.enhanced_analyzer.morph.get_phrase_keywords(phrase)
+                                    for phrase in dictionary["phrases"]]
+            }
+
     def analyze_utterance(self, utterance: Utterance, dictionaries: List[Dict]) -> AnalysisResult:
-        """Оптимизированный анализ высказывания"""
+        """Улучшенный анализ высказывания с учетом морфологии"""
         cache_key = f"{utterance.text}_{hash(str(dictionaries))}"
 
-        # Проверка кэша
         if cache_key in self.analysis_cache:
             self.cache_hits += 1
             return self.analysis_cache[cache_key]
@@ -229,12 +273,11 @@ class TextAnalyzer:
         self.cache_misses += 1
         result = AnalysisResult()
 
-        # Быстрая проверка грубостей и приветствий
-        text_lower = utterance.text.lower()
-        result.rude_words = [w for w in self.rude_words if w in text_lower]
-        result.greetings = [g for g in self.greetings if g in text_lower]
+        # Предварительная обработка словарей, если не сделана
+        if not self.preprocessed_dictionaries:
+            self.preprocess_dictionaries(dictionaries)
 
-        # Параллельная обработка словарей
+        # Анализ для каждого словаря
         for dictionary in dictionaries:
             dict_type = dictionary["type"]
             if ((dict_type == DictionaryType.CLIENT and utterance.speaker != "client")
@@ -243,7 +286,7 @@ class TextAnalyzer:
 
             matched = []
             for phrase in dictionary["phrases"]:
-                found, match_type, positions = self.fast_analyzer.is_phrase_in_text(phrase, utterance.text)
+                found, match_type, positions = self.enhanced_analyzer.is_phrase_in_text(phrase, utterance.text)
 
                 if found:
                     matched.append(phrase)
@@ -265,7 +308,7 @@ class TextAnalyzer:
 
         # Создаем текст с подсветками
         if result.highlights:
-            result.text_with_highlights = self.fast_analyzer.add_highlights_to_text(
+            result.text_with_highlights = self.enhanced_analyzer.add_highlights_to_text(
                 utterance.text, result.highlights
             )
         else:
@@ -273,11 +316,12 @@ class TextAnalyzer:
 
         # Сохраняем в кэш
         self.analysis_cache[cache_key] = result
-        if len(self.analysis_cache) > 1000:  # Ограничиваем размер кэша
+        if len(self.analysis_cache) > 1000:
             self.analysis_cache.clear()
 
         return result
 
+    # Остальные методы остаются без изменений
     def analyze_conversation_batch(self, conversation: List[Dict | Utterance], dictionaries: List[Dict]) -> Dict[
         str, AnalysisResult]:
         """Пакетный анализ разговора"""
@@ -318,15 +362,7 @@ class TextAnalyzer:
 
         return result
 
-    def preprocess_dictionaries(self, dictionaries: List[Dict]) -> None:
-        """Предварительная обработка словарей для ускорения"""
-        for dictionary in dictionaries:
-            dictionary['phrases_set'] = set(dictionary['phrases'])
-            dictionary['phrases_lower'] = [phrase.lower() for phrase in dictionary['phrases']]
-
     def clear_cache(self):
         """Очистка кэша"""
         self.analysis_cache.clear()
-        self.fast_analyzer.normalize_text.cache_clear()
-        self.fast_analyzer.morph.cached_parse.cache_clear()
-        self.fast_analyzer.morph.cached_normalize.cache_clear()
+        self.enhanced_analyzer.morph.normalize_word.cache_clear()
