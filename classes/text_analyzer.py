@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 import pymorphy3
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 import re
 from functools import lru_cache
 from entities.dictionary_entity import DictionaryType
@@ -163,6 +163,72 @@ class EnhancedTextAnalyzer:
 
         return positions
 
+    def find_contextual_phrase_positions(self, phrase: str, text: str, threshold: float = 0.75) -> List[
+        Tuple[int, int]]:
+        """Поиск фраз в контексте с учетом ключевых слов"""
+        norm_phrase = self.morph.normalize_phrase(phrase)
+        norm_text = self.morph.normalize_phrase(text)
+
+        phrase_words = norm_phrase.split()
+        text_words = norm_text.split()
+
+        if len(phrase_words) < 2:
+            return []
+
+        # Получаем ключевые слова фразы (исключая стоп-слова)
+        keywords = [word for word in phrase_words if not self.morph.is_stop_word(word)]
+
+        if not keywords:
+            return []
+
+        # Ищем позиции ключевых слов в тексте
+        keyword_positions = {}
+        for keyword in keywords:
+            for i, word in enumerate(text_words):
+                if word == keyword:
+                    if keyword not in keyword_positions:
+                        keyword_positions[keyword] = []
+                    keyword_positions[keyword].append(i)
+
+        # Проверяем, есть ли все ключевые слова в тексте
+        if len(keyword_positions) < len(keywords):
+            return []
+
+        # Ищем последовательности, где ключевые слова идут в правильном порядке
+        positions = []
+
+        # Для каждого вхождения первого ключевого слова
+        first_keyword = keywords[0]
+        if first_keyword in keyword_positions:
+            for start_idx in keyword_positions[first_keyword]:
+                current_idx = start_idx
+                matched_keywords = [first_keyword]
+
+                # Проверяем, идут ли остальные ключевые слова в правильном порядке
+                for keyword in keywords[1:]:
+                    if keyword in keyword_positions:
+                        # Ищем следующее ключевое слово после current_idx
+                        found = False
+                        for next_idx in keyword_positions[keyword]:
+                            if next_idx > current_idx:
+                                current_idx = next_idx
+                                matched_keywords.append(keyword)
+                                found = True
+                                break
+                        if not found:
+                            break
+
+                # Если нашли все ключевые слова в правильном порядке
+                if len(matched_keywords) == len(keywords):
+                    # Находим позиции в оригинальном тексте
+                    text_matches = list(self.word_pattern.finditer(text))
+                    if start_idx < len(text_matches) and current_idx < len(text_matches):
+                        start_pos = text_matches[start_idx].start()
+                        end_pos = text_matches[current_idx].end()
+                        positions.append((start_pos, end_pos))
+
+        return positions
+
     def is_phrase_in_text(self, phrase: str, text: str, threshold: float = 0.85) -> Tuple[
         bool, str, List[Tuple[int, int]]]:
         """
@@ -178,35 +244,15 @@ class EnhancedTextAnalyzer:
         if normalized_positions:
             return True, "normalized", normalized_positions
 
-        # 3. Семантическое сходство для фраз
+        # 3. Контекстуальный поиск (ключевые слова в правильном порядке)
+        contextual_positions = self.find_contextual_phrase_positions(phrase, text, threshold)
+        if contextual_positions:
+            return True, "contextual", contextual_positions
+
+        # 4. Семантическое сходство для фраз
         semantic_positions = self.find_semantic_phrase_positions(phrase, text, threshold)
         if semantic_positions:
             return True, "semantic", semantic_positions
-
-        # 4. Проверка ключевых слов для длинных фраз
-        if len(phrase.split()) >= 3:
-            phrase_keywords = self.morph.get_phrase_keywords(phrase)
-            text_keywords = self.morph.get_phrase_keywords(text)
-
-            if phrase_keywords and text_keywords:
-                common_keywords = phrase_keywords & text_keywords
-                keyword_similarity = len(common_keywords) / len(phrase_keywords)
-
-                if keyword_similarity >= 0.8:
-                    # Находим позиции ключевых слов
-                    positions = []
-                    for keyword in common_keywords:
-                        # Ищем ключевые слова в тексте
-                        for match in re.finditer(r'\b' + re.escape(keyword) + r'\b',
-                                                 self.morph.normalize_phrase(text), re.IGNORECASE):
-                            # Находим соответствующую позицию в оригинальном тексте
-                            original_matches = list(self.word_pattern.finditer(text))
-                            if match.start() < len(original_matches):
-                                original_match = original_matches[match.start()]
-                                positions.append((original_match.start(), original_match.end()))
-
-                    if positions:
-                        return True, "keyword", positions
 
         return False, "none", []
 
@@ -215,14 +261,8 @@ class EnhancedTextAnalyzer:
         if not highlights:
             return text
 
-        # Убираем дубликаты и сортируем
-        unique_highlights = {}
-        for highlight in highlights:
-            key = (highlight.start_pos, highlight.end_pos)
-            if key not in unique_highlights:
-                unique_highlights[key] = highlight
-
-        sorted_highlights = sorted(unique_highlights.values(), key=lambda x: x.start_pos)
+        # Сортируем подсветки по начальной позиции
+        sorted_highlights = sorted(highlights, key=lambda x: x.start_pos)
 
         # Обрабатываем пересекающиеся подсветки
         merged_highlights = []
@@ -325,19 +365,43 @@ class TextAnalyzer:
                 found, match_type, positions = self.enhanced_analyzer.is_phrase_in_text(phrase, utterance.text)
 
                 if found:
-                    matched.append(phrase)
-                    for start_pos, end_pos in positions:
-                        result.highlights.append(
-                            ConversationHighlight(
-                                phrase=phrase,
-                                start_pos=start_pos,
-                                end_pos=end_pos,
-                                dictionary_name=dictionary["name"],
-                                dictionary_id=dictionary["id"],
-                                dictionary_color=dictionary["color"],
-                                match_type=match_type
+                    # Проверяем, что найденная фраза действительно соответствует контексту
+                    if match_type in ["keyword", "contextual"]:
+                        # Для контекстуальных совпадений дополнительно проверяем качество
+                        norm_phrase = self.enhanced_analyzer.morph.normalize_phrase(phrase)
+                        for start_pos, end_pos in positions:
+                            found_text = utterance.text[start_pos:end_pos]
+                            norm_found = self.enhanced_analyzer.morph.normalize_phrase(found_text)
+                            similarity = fuzz.ratio(norm_phrase, norm_found) / 100
+
+                            if similarity >= 0.7:  # Порог для контекстуальных совпадений
+                                matched.append(phrase)
+                                result.highlights.append(
+                                    ConversationHighlight(
+                                        phrase=phrase,
+                                        start_pos=start_pos,
+                                        end_pos=end_pos,
+                                        dictionary_name=dictionary["name"],
+                                        dictionary_id=dictionary["id"],
+                                        dictionary_color=dictionary["color"],
+                                        match_type=match_type
+                                    )
+                                )
+                    else:
+                        # Для точных и нормализованных совпадений добавляем без проверки
+                        matched.append(phrase)
+                        for start_pos, end_pos in positions:
+                            result.highlights.append(
+                                ConversationHighlight(
+                                    phrase=phrase,
+                                    start_pos=start_pos,
+                                    end_pos=end_pos,
+                                    dictionary_name=dictionary["name"],
+                                    dictionary_id=dictionary["id"],
+                                    dictionary_color=dictionary["color"],
+                                    match_type=match_type
+                                )
                             )
-                        )
 
             if matched:
                 result.matched_phrases[dictionary["id"]] = matched
