@@ -3,7 +3,6 @@ import logging
 from typing import List, Dict, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 import pymorphy3
-from rapidfuzz import fuzz, process
 import re
 from functools import lru_cache
 from entities.dictionary_entity import DictionaryType
@@ -131,39 +130,68 @@ class EnhancedTextAnalyzer:
 
         return original_positions
 
-    def find_complete_phrase_positions(self, phrase: str, text: str, threshold: float = 0.85) -> List[Tuple[int, int]]:
-        """Поиск полных фраз с учетом морфологии и порядка слов"""
+    def find_contextual_phrase_positions(self, phrase: str, text: str, threshold: float = 0.75) -> List[
+        Tuple[int, int]]:
+        """Поиск фраз в контексте с учетом ключевых слов (только для анализа, не для подсветки)"""
         norm_phrase = self.morph.normalize_phrase(phrase)
         norm_text = self.morph.normalize_phrase(text)
 
-        # Разбиваем на слова
         phrase_words = norm_phrase.split()
         text_words = norm_text.split()
 
         if len(phrase_words) < 2:
             return []
 
-        # Ищем полное вхождение фразы
+        # Получаем ключевые слова фразы (исключая стоп-слова)
+        keywords = [word for word in phrase_words if not self.morph.is_stop_word(word)]
+
+        if not keywords:
+            return []
+
+        # Ищем позиции ключевых слов в тексте
+        keyword_positions = {}
+        for keyword in keywords:
+            for i, word in enumerate(text_words):
+                if word == keyword:
+                    if keyword not in keyword_positions:
+                        keyword_positions[keyword] = []
+                    keyword_positions[keyword].append(i)
+
+        # Проверяем, есть ли все ключевые слова в тексте
+        if len(keyword_positions) < len(keywords):
+            return []
+
+        # Ищем последовательности, где ключевые слова идут в правильном порядке
         positions = []
-        phrase_len = len(phrase_words)
 
-        for i in range(len(text_words) - phrase_len + 1):
-            window = ' '.join(text_words[i:i + phrase_len])
+        # Для каждого вхождения первого ключевого слова
+        first_keyword = keywords[0]
+        if first_keyword in keyword_positions:
+            for start_idx in keyword_positions[first_keyword]:
+                current_idx = start_idx
+                matched_keywords = [first_keyword]
 
-            # Проверяем полное совпадение с высокой точностью
-            similarity = fuzz.ratio(norm_phrase, window) / 100
+                # Проверяем, идут ли остальные ключевые слова в правильном порядке
+                for keyword in keywords[1:]:
+                    if keyword in keyword_positions:
+                        # Ищем следующее ключевое слово после current_idx
+                        found = False
+                        for next_idx in keyword_positions[keyword]:
+                            if next_idx > current_idx:
+                                current_idx = next_idx
+                                matched_keywords.append(keyword)
+                                found = True
+                                break
+                        if not found:
+                            break
 
-            if similarity >= threshold:
-                # Дополнительная проверка: ключевые слова должны совпадать
-                phrase_keywords = [w for w in phrase_words if not self.morph.is_stop_word(w)]
-                window_keywords = [w for w in text_words[i:i + phrase_len] if not self.morph.is_stop_word(w)]
-
-                if set(phrase_keywords) == set(window_keywords):
+                # Если нашли все ключевые слова в правильном порядке
+                if len(matched_keywords) == len(keywords):
                     # Находим позиции в оригинальном тексте
                     text_matches = list(self.word_pattern.finditer(text))
-                    if i < len(text_matches) and i + phrase_len <= len(text_matches):
-                        start_pos = text_matches[i].start()
-                        end_pos = text_matches[i + phrase_len - 1].end()
+                    if start_idx < len(text_matches) and current_idx < len(text_matches):
+                        start_pos = text_matches[start_idx].start()
+                        end_pos = text_matches[current_idx].end()
                         positions.append((start_pos, end_pos))
 
         return positions
@@ -171,8 +199,8 @@ class EnhancedTextAnalyzer:
     def is_phrase_in_text(self, phrase: str, text: str, threshold: float = 0.9) -> Tuple[
         bool, str, List[Tuple[int, int]]]:
         """
-        Улучшенная проверка вхождения фразы с учетом морфологии
-        Теперь ищем только полные фразы!
+        Проверка вхождения фразы с учетом морфологии
+        Возвращает разные типы совпадений для анализа
         """
         # 1. Точное совпадение
         exact_positions = self.find_exact_phrase_positions(phrase, text)
@@ -184,10 +212,10 @@ class EnhancedTextAnalyzer:
         if normalized_positions:
             return True, "normalized", normalized_positions
 
-        # 3. Полное совпадение с учетом морфологии и порядка слов
-        complete_positions = self.find_complete_phrase_positions(phrase, text, threshold)
-        if complete_positions:
-            return True, "complete", complete_positions
+        # 3. Контекстуальное совпадение (только для анализа, не для подсветки)
+        contextual_positions = self.find_contextual_phrase_positions(phrase, text, threshold)
+        if contextual_positions:
+            return True, "contextual", contextual_positions
 
         return False, "none", []
 
@@ -301,22 +329,9 @@ class TextAnalyzer:
                                                                                         threshold)
 
                 if found:
-                    # Дополнительная проверка для избежания ложных срабатываний
-                    valid_match = True
-
-                    for start_pos, end_pos in positions:
-                        found_text = utterance.text[start_pos:end_pos]
-                        norm_phrase = self.enhanced_analyzer.morph.normalize_phrase(phrase)
-                        norm_found = self.enhanced_analyzer.morph.normalize_phrase(found_text)
-
-                        # Проверяем, что найденный текст действительно соответствует фразе
-                        if match_type in ["complete"]:
-                            similarity = fuzz.ratio(norm_phrase, norm_found) / 100
-                            if similarity < threshold:
-                                valid_match = False
-                                break
-
-                    if valid_match:
+                    # ДЛЯ ПОДСВЕТКИ: добавляем только точные и нормализованные совпадения
+                    # contextual оставляем только для анализа, но не для визуализации
+                    if match_type in ["exact", "normalized"]:
                         matched.append(phrase)
                         for start_pos, end_pos in positions:
                             result.highlights.append(
@@ -330,6 +345,11 @@ class TextAnalyzer:
                                     match_type=match_type
                                 )
                             )
+
+                    # ДЛЯ АНАЛИЗА: contextual тоже считаем найденным, но не подсвечиваем
+                    elif match_type == "contextual":
+                        matched.append(phrase)
+                        # Не добавляем в highlights, только в matched_phrases для анализа
 
             if matched:
                 result.matched_phrases[dictionary["id"]] = matched
