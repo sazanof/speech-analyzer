@@ -47,6 +47,15 @@ class EnhancedMorphAnalyzer:
         self.morph = pymorphy3.MorphAnalyzer()
         self.normalize_cache = {}
         self.phrase_normalize_cache = {}
+        self.stop_words = {
+            "я", "мне", "меня", "ты", "тебе", "тебя", "он", "его", "ей", "она",
+            "мы", "нам", "нас", "вы", "вам", "вас", "они", "им", "их",
+            "в", "на", "за", "под", "над", "от", "до", "из", "к", "по", "со", "у",
+            "и", "а", "но", "да", "или", "ли", "же", "бы", "вот", "всё", "все",
+            "не", "ни", "как", "так", "то", "это", "что", "чтоб", "чтобы", "для",
+            "о", "об", "про", "с", "со", "из-за", "из", "от", "до", "по", "под",
+            "над", "перед", "при", "через", "сквозь", "между", "среди", "вокруг"
+        }
 
     @lru_cache(maxsize=10000)
     def normalize_word(self, word: str) -> str:
@@ -71,20 +80,14 @@ class EnhancedMorphAnalyzer:
 
     def get_phrase_keywords(self, phrase: str) -> Set[str]:
         """Извлечение ключевых слов из фразы (исключая стоп-слова)"""
-        stop_words = {
-            "я", "мне", "меня", "ты", "тебе", "тебя", "он", "его", "ей", "она",
-            "мы", "нам", "нас", "вы", "вам", "вас", "они", "им", "их",
-            "в", "на", "за", "под", "над", "от", "до", "из", "к", "по", "со", "у",
-            "и", "а", "но", "да", "или", "ли", "же", "бы", "вот", "всё", "все",
-            "не", "ни", "как", "так", "то", "это", "что", "чтоб", "чтобы", "для",
-            "о", "об", "про", "с", "со", "из-за", "из", "от", "до", "по", "под",
-            "над", "перед", "при", "через", "сквозь", "между", "среди", "вокруг"
-        }
-
         words = re.findall(r'\b\w+\b', phrase.lower())
         keywords = {self.normalize_word(word) for word in words
-                    if len(word) > 2 and word not in stop_words}
+                    if len(word) > 2 and word not in self.stop_words}
         return keywords
+
+    def is_stop_word(self, word: str) -> bool:
+        """Проверка, является ли слово стоп-словом"""
+        return word.lower() in self.stop_words
 
 
 class EnhancedTextAnalyzer:
@@ -92,10 +95,7 @@ class EnhancedTextAnalyzer:
 
     def __init__(self):
         self.morph = EnhancedMorphAnalyzer()
-
-        # Предварительно скомпилированные regex patterns
         self.word_pattern = re.compile(r'\b\w+\b')
-        self.phrase_patterns = {}
 
     def find_exact_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
         """Точный поиск позиций фразы"""
@@ -131,6 +131,38 @@ class EnhancedTextAnalyzer:
 
         return original_positions
 
+    def find_semantic_phrase_positions(self, phrase: str, text: str, threshold: float = 0.8) -> List[Tuple[int, int]]:
+        """Поиск семантически похожих фраз с учетом порядка слов"""
+        norm_phrase = self.morph.normalize_phrase(phrase)
+        norm_text = self.morph.normalize_phrase(text)
+
+        # Разбиваем на слова
+        phrase_words = norm_phrase.split()
+        text_words = norm_text.split()
+
+        if len(phrase_words) < 2:
+            return []
+
+        # Ищем последовательности слов с похожим порядком
+        positions = []
+        phrase_len = len(phrase_words)
+
+        for i in range(len(text_words) - phrase_len + 1):
+            window = ' '.join(text_words[i:i + phrase_len])
+
+            # Проверяем семантическое сходство
+            similarity = fuzz.ratio(norm_phrase, window) / 100
+
+            if similarity >= threshold:
+                # Находим позиции в оригинальном тексте
+                text_matches = list(self.word_pattern.finditer(text))
+                if i < len(text_matches) and i + phrase_len <= len(text_matches):
+                    start_pos = text_matches[i].start()
+                    end_pos = text_matches[i + phrase_len - 1].end()
+                    positions.append((start_pos, end_pos))
+
+        return positions
+
     def is_phrase_in_text(self, phrase: str, text: str, threshold: float = 0.85) -> Tuple[
         bool, str, List[Tuple[int, int]]]:
         """
@@ -146,35 +178,35 @@ class EnhancedTextAnalyzer:
         if normalized_positions:
             return True, "normalized", normalized_positions
 
-        # 3. Семантическое сходство для длинных фраз
-        if len(phrase.split()) >= 3:
-            norm_phrase = self.morph.normalize_phrase(phrase)
-            norm_text = self.morph.normalize_phrase(text)
+        # 3. Семантическое сходство для фраз
+        semantic_positions = self.find_semantic_phrase_positions(phrase, text, threshold)
+        if semantic_positions:
+            return True, "semantic", semantic_positions
 
-            # Проверяем ключевые слова
+        # 4. Проверка ключевых слов для длинных фраз
+        if len(phrase.split()) >= 3:
             phrase_keywords = self.morph.get_phrase_keywords(phrase)
             text_keywords = self.morph.get_phrase_keywords(text)
 
-            # Должно быть не менее 70% ключевых слов
             if phrase_keywords and text_keywords:
                 common_keywords = phrase_keywords & text_keywords
                 keyword_similarity = len(common_keywords) / len(phrase_keywords)
 
-                if keyword_similarity >= 0.7:
-                    # Дополнительная проверка fuzzy similarity
-                    similarity = fuzz.partial_ratio(norm_phrase, norm_text) / 100
-                    if similarity >= threshold:
-                        # Находим позиции ключевых слов
-                        positions = []
-                        for keyword in common_keywords:
-                            # Ищем ключевые слова в тексте
-                            for match in re.finditer(r'\b' + re.escape(keyword) + r'\b', norm_text, re.IGNORECASE):
-                                # Находим соответствующую позицию в оригинальном тексте
-                                original_match = list(self.word_pattern.finditer(text))[match.start()]
+                if keyword_similarity >= 0.8:
+                    # Находим позиции ключевых слов
+                    positions = []
+                    for keyword in common_keywords:
+                        # Ищем ключевые слова в тексте
+                        for match in re.finditer(r'\b' + re.escape(keyword) + r'\b',
+                                                 self.morph.normalize_phrase(text), re.IGNORECASE):
+                            # Находим соответствующую позицию в оригинальном тексте
+                            original_matches = list(self.word_pattern.finditer(text))
+                            if match.start() < len(original_matches):
+                                original_match = original_matches[match.start()]
                                 positions.append((original_match.start(), original_match.end()))
 
-                        if positions:
-                            return True, "semantic", positions
+                    if positions:
+                        return True, "keyword", positions
 
         return False, "none", []
 
@@ -286,6 +318,10 @@ class TextAnalyzer:
 
             matched = []
             for phrase in dictionary["phrases"]:
+                # Пропускаем слишком короткие фразы для семантического анализа
+                if len(phrase.split()) < 2:
+                    continue
+
                 found, match_type, positions = self.enhanced_analyzer.is_phrase_in_text(phrase, utterance.text)
 
                 if found:
