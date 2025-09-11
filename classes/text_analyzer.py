@@ -3,6 +3,7 @@ import logging
 from typing import List, Dict, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 import pymorphy3
+from rapidfuzz import fuzz, process
 import re
 from functools import lru_cache
 from entities.dictionary_entity import DictionaryType
@@ -97,17 +98,18 @@ class EnhancedTextAnalyzer:
         self.word_pattern = re.compile(r'\b\w+\b')
 
     def find_exact_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
-        """Точный поиск позиций фразы"""
-        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        """Точный поиск позиций фразы с учетом границ слов"""
+        # Используем границы слов для точного поиска
+        pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
         return [(match.start(), match.end()) for match in pattern.finditer(text)]
 
     def find_normalized_phrase_positions(self, phrase: str, text: str) -> List[Tuple[int, int]]:
-        """Поиск позиций нормализованной фразы"""
+        """Поиск позиций нормализованной фразы с учетом границ слов"""
         norm_phrase = self.morph.normalize_phrase(phrase)
         norm_text = self.morph.normalize_phrase(text)
 
-        # Ищем нормализованную фразу в нормализованном тексте
-        pattern = re.compile(re.escape(norm_phrase), re.IGNORECASE)
+        # Ищем нормализованную фразу в нормализованном тексте с границами слов
+        pattern = re.compile(r'\b' + re.escape(norm_phrase) + r'\b', re.IGNORECASE)
         matches = list(pattern.finditer(norm_text))
 
         if not matches:
@@ -148,14 +150,17 @@ class EnhancedTextAnalyzer:
         if not keywords:
             return []
 
-        # Ищем позиции ключевых слов в тексте
+        # Ищем позиции ключевых слов в тексте с учетом границ слов
         keyword_positions = {}
         for keyword in keywords:
-            for i, word in enumerate(text_words):
-                if word == keyword:
-                    if keyword not in keyword_positions:
-                        keyword_positions[keyword] = []
-                    keyword_positions[keyword].append(i)
+            # Используем границы слов для поиска ключевых слов
+            pattern = re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE)
+            for match in pattern.finditer(norm_text):
+                word_start = match.start()
+                word_idx = len(norm_text[:word_start].split())
+                if keyword not in keyword_positions:
+                    keyword_positions[keyword] = []
+                keyword_positions[keyword].append(word_idx)
 
         # Проверяем, есть ли все ключевые слова в тексте
         if len(keyword_positions) < len(keywords):
@@ -202,12 +207,12 @@ class EnhancedTextAnalyzer:
         Проверка вхождения фразы с учетом морфологии
         Возвращает разные типы совпадений для анализа
         """
-        # 1. Точное совпадение
+        # 1. Точное совпадение с границами слов
         exact_positions = self.find_exact_phrase_positions(phrase, text)
         if exact_positions:
             return True, "exact", exact_positions
 
-        # 2. Нормализованное совпадение (учитывает морфологию)
+        # 2. Нормализованное совпадение с границами слов
         normalized_positions = self.find_normalized_phrase_positions(phrase, text)
         if normalized_positions:
             return True, "normalized", normalized_positions
@@ -332,19 +337,36 @@ class TextAnalyzer:
                     # ДЛЯ ПОДСВЕТКИ: добавляем только точные и нормализованные совпадения
                     # contextual оставляем только для анализа, но не для визуализации
                     if match_type in ["exact", "normalized"]:
-                        matched.append(phrase)
+                        # Дополнительная проверка: убедимся, что это действительно полное совпадение
+                        valid_match = True
                         for start_pos, end_pos in positions:
-                            result.highlights.append(
-                                ConversationHighlight(
-                                    phrase=phrase,
-                                    start_pos=start_pos,
-                                    end_pos=end_pos,
-                                    dictionary_name=dictionary["name"],
-                                    dictionary_id=dictionary["id"],
-                                    dictionary_color=dictionary["color"],
-                                    match_type=match_type
+                            found_text = utterance.text[start_pos:end_pos]
+                            # Проверяем, что найденный текст соответствует фразе
+                            if match_type == "exact":
+                                if found_text.lower() != phrase.lower():
+                                    valid_match = False
+                                    break
+                            elif match_type == "normalized":
+                                norm_phrase = self.enhanced_analyzer.morph.normalize_phrase(phrase)
+                                norm_found = self.enhanced_analyzer.morph.normalize_phrase(found_text)
+                                if norm_found != norm_phrase:
+                                    valid_match = False
+                                    break
+
+                        if valid_match:
+                            matched.append(phrase)
+                            for start_pos, end_pos in positions:
+                                result.highlights.append(
+                                    ConversationHighlight(
+                                        phrase=phrase,
+                                        start_pos=start_pos,
+                                        end_pos=end_pos,
+                                        dictionary_name=dictionary["name"],
+                                        dictionary_id=dictionary["id"],
+                                        dictionary_color=dictionary["color"],
+                                        match_type=match_type
+                                    )
                                 )
-                            )
 
                     # ДЛЯ АНАЛИЗА: contextual тоже считаем найденным, но не подсвечиваем
                     elif match_type == "contextual":
