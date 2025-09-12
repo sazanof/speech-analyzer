@@ -245,9 +245,9 @@ class EnhancedTextAnalyzer:
                     phrase=f"{current_highlight.phrase}|{highlight.phrase}",
                     start_pos=min(current_highlight.start_pos, highlight.start_pos),
                     end_pos=max(current_highlight.end_pos, highlight.end_pos),
-                    dictionary_name="multiple",
-                    dictionary_id=0,
-                    dictionary_color="#ff9900",
+                    dictionary_name=current_highlight.dictionary_name,
+                    dictionary_id=current_highlight.dictionary_id,
+                    dictionary_color=current_highlight.dictionary_color,
                     match_type="merged"
                 )
             else:
