@@ -364,6 +364,7 @@ class TextAnalyzer:
                                         dictionary_name=dictionary["name"],
                                         dictionary_id=dictionary["id"],
                                         dictionary_color=dictionary["color"],
+                                        dictionary_type=dictionary["type"],
                                         match_type=match_type
                                     )
                                 )

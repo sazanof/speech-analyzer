@@ -17,6 +17,7 @@ class ConversationHighlight(BaseModel):
     dictionary_id: int
     dictionary_name: str
     dictionary_color: str|None = None
+    dictionary_type: str|None = None
     match_type: str
 
 

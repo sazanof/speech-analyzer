@@ -3,6 +3,8 @@ from sqlmodel import select, asc
 
 from database.database import write_session
 from entities.conversation_entity import ConversationEntity
+from entities.enums.recording_task_status import RecordingTaskStatus
+from entities.recording_entity import RecordingEntity
 from models.conversation_model import ConversationHighlight, ConversationModel, ConversationIdModel
 from models.success_response import SuccessResponse
 
@@ -11,6 +13,21 @@ conversations = APIRouter(
     tags=['conversations']
 )
 
+
+@conversations.put('/{record_id}', response_model=SuccessResponse)
+def analyze_conversation_force(
+        record_id: int
+):
+    with write_session() as sess:
+        recording = sess.get(RecordingEntity, record_id)
+        if recording:
+            recording.analysis_status = RecordingTaskStatus.NEW.value
+            sess.add(recording)
+            return SuccessResponse()
+
+    return SuccessResponse(
+        success=False,
+    )
 
 @conversations.get('/{record_id}', response_model=SuccessResponse)
 def get_recording(
