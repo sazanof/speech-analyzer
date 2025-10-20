@@ -29,15 +29,15 @@ def create_dictionary(
             session.refresh(db_dict)
 
             # Update all analyzed models
-            session.exec(
-                update(RecordingEntity)
-                .where(col(RecordingEntity.analysis_status).in_([
-                    RecordingTaskStatus.PENDING.value,
-                    RecordingTaskStatus.FAILED.value,
-                    RecordingTaskStatus.FINISHED.value,
-                ]))
-                .values(analysis_status=RecordingTaskStatus.NEW.value)
-            )
+            # session.exec(
+            #     update(RecordingEntity)
+            #     .where(col(RecordingEntity.analysis_status).in_([
+            #         RecordingTaskStatus.PENDING.value,
+            #         RecordingTaskStatus.FAILED.value,
+            #         RecordingTaskStatus.FINISHED.value,
+            #     ]))
+            #     .values(analysis_status=RecordingTaskStatus.NEW.value)
+            # )
 
             return db_dict
 
