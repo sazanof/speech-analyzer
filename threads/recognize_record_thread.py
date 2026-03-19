@@ -34,19 +34,27 @@ class RecognizeThread:
         while not self.shutdown_event.is_set():
             try:
                 self._fetch_new_tasks()
-                time.sleep(3)  # Уменьшили интервал проверки
+                time.sleep(10)
             except Exception as e:
                 Logger.err(f"Error in watcher thread: {str(e)} {type(e)}")
-                time.sleep(10)
+                time.sleep(30)
 
     def _fetch_new_tasks(self):
         """Поиск новых задач в базе данных"""
+        # Проверяем, есть ли свободные воркеры
+        with self.lock:
+            if len(self.current_tasks) >= self.max_workers:
+                return  # Не берем новые задачи, если все воркеры заняты
+
         with write_session() as session:
-            # Получаем ID текущих выполняемых задач
             with self.lock:
                 current_task_ids = list(self.current_tasks.keys())
 
-            # Ищем задачи со статусом NEW, исключая текущие
+            # Берем ровно столько задач, сколько свободных воркеров
+            free_workers = self.max_workers - len(self.current_tasks)
+            if free_workers <= 0:
+                return
+
             new_tasks = session.exec(
                 select(RecordingEntity)
                 .where(
@@ -54,7 +62,7 @@ class RecognizeThread:
                     col(RecordingEntity.id).not_in(current_task_ids) if current_task_ids else True
                 )
                 .order_by(asc(RecordingEntity.created))
-                .limit(self.max_workers * 2)  # Берем больше задач чем воркеров
+                .limit(free_workers)  # Берем только на свободные воркеры
             ).all()
 
             for task in new_tasks:
@@ -92,7 +100,7 @@ class RecognizeThread:
             Logger.info(f'Starting recognition for task: {task.id}')
 
             # Выполняем распознавание
-            analyzer = ConversationAnalyzer()
+            analyzer = ConversationAnalyzer("medium")
             analysis = analyzer.analyze(task.path)
 
             with write_session() as session:
@@ -180,4 +188,4 @@ class RecognizeThread:
 
 
 # Создаем экземпляр с 4 рабочими потоками
-recognize_thread = RecognizeThread(max_workers=1)
+recognize_thread = RecognizeThread(max_workers=4)

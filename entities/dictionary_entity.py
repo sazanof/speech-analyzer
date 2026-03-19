@@ -23,7 +23,7 @@ class DictionaryBase(SQLModel):
         default=None
     )
     color: Optional[str] = Field(default="#CCCCCC")
-    problem_score: Optional[int] = Field(ge=0, le=10)
+    problem_score: Optional[int] = None
 
 class DictionaryEntity(DictionaryBase, table=True):
     __tablename__ = "dictionaries"

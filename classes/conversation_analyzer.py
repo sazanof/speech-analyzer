@@ -1,15 +1,26 @@
+import logging
 import os
 import time
 import tempfile
+from dataclasses import asdict
+
 import requests
 from datetime import timedelta
 from typing import List, Union
-import whisper
+from faster_whisper import WhisperModel
 from pydub import AudioSegment
 from urllib.parse import urlparse
-
 from models.recognizer_models import Utterance, ConversationAnalysis
 
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+# Устанавливаем уровень INFO именно для faster_whisper
+logger = logging.getLogger("faster_whisper")
+logger.setLevel(logging.DEBUG) # DEBUG покажет максимум деталей
 
 class ConversationAnalyzer:
     def __init__(self, model_name: str = "large"):
@@ -20,7 +31,11 @@ class ConversationAnalyzer:
 
         :param model_name: Название модели Whisper (по умолчанию "large")
         """
-        self.model = whisper.load_model(model_name)
+        self.model = WhisperModel(
+            model_size_or_path="medium",
+            device="cpu",
+            compute_type="int8"
+        )
         self.temp_files = []  # Для хранения путей временных файлов
 
     def __del__(self):
@@ -103,16 +118,30 @@ class ConversationAnalyzer:
 
     def transcribe_audio(self, audio_path: str) -> list[dict]:
         """Транскрибирует аудиофайл с помощью Whisper и возвращает сегменты."""
-        result = self.model.transcribe(
+        segments, info = self.model.transcribe(
             audio_path,
-            verbose=True,
             temperature=0,
             language="ru",
-            condition_on_previous_text=False  # Критично важно!
+            condition_on_previous_text=False,  # Критично важно!
+            beam_size=1,  # Уменьшить beam search (было 5 по умолчанию)
+            best_of=1,  # Уменьшить количество кандидатов
+            vad_filter=True,  # Фильтр пауз для ускорения
+            vad_parameters=dict(
+                threshold=0.5,
+                min_speech_duration_ms=250,
+                min_silence_duration_ms=100
+            )
         )
-        time.sleep(1)
-        return result["segments"]
+        result_segments = []
+        for seg in segments:
+            result_segments.append({
+                'text': seg.text,
+                'start': seg.start,
+                'end': seg.end
+            })
 
+        time.sleep(1)  # Можно убрать или оставить
+        return result_segments
     @staticmethod
     def format_time(seconds: float) -> str:
         """Форматирует время в читаемый формат (HH:MM:SS)."""
