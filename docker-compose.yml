@@ -1,8 +1,6 @@
 services:
   web:
     build: .
-    volumes:
-      - whisper-cache:/app/whisper-cache
     env_file:
       - .env
     ports:

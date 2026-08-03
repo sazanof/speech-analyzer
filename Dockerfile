@@ -15,9 +15,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Создаем директорию для кэша и загружаем модель от root
-RUN mkdir -p /app/whisper-cache && \
-    chmod 777 /app/whisper-cache && \
-    WHISPER_CACHE_DIR=/app/whisper-cache python -c "import whisper; whisper.load_model('large')"
+#RUN mkdir -p /app/whisper-cache && \
+#    chmod 777 /app/whisper-cache && \
+#    WHISPER_CACHE_DIR=/app/whisper-cache python -c "import whisper; whisper.load_model('large')"
 
 COPY . .
 

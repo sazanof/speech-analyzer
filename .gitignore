@@ -62,3 +62,6 @@ logs/
 # Системные
 .DS_Store
 Thumbs.db
+
+.tmp-*
+speech-recognizer-*.tar
